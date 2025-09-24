@@ -222,7 +222,13 @@ def extract_representative_utterances(normalized_patterns, mi_scores, output_fol
                 num_to_extract = min(100, len(utterances_for_context))
 
                 for utt in utterances_for_context[:num_to_extract]:
-                    f.write(f"- {utt}\n")
+                    # Determine if this utterance was the first one counted for its pattern
+                    # This requires checking against the internal deduplication logic
+                    # Since we don't have that information here, we will have to assume
+                    # the first one in the list is the representative.
+                    is_representative = (utt == utterances_for_context[0])
+                    prefix = "*" if is_representative else ""
+                    f.write(f"{prefix}- {utt}\n")
                 f.write("\n")
 
             print(f"Saved utterances for SFP '{sfp_char}' to {output_path}")
