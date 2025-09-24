@@ -2,3 +2,5 @@
 .env
 *.txt
 *.text
+*.csv
+/*/

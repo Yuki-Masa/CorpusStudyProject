@@ -14,14 +14,14 @@ import re
 from dotenv import load_dotenv
 
 """
-to calculate Pointwise Mutual Information (PMI) of the SFPs (sentence-final particles) and the
-sequence patterns of POS tags
+to calculate Mutual Information of the SFPs (sentence-final particles) and the
+sequence patterns of POS pos tags
 
 Version Memo:
 
-1. Corrected deduplication logic to handle specific word/punctuation patterns.
-2. Using PMI.
-3. Interrogative tag is added.
+1. No overcounting,
+2. Using MI (not PMI),
+3. Interrogative tag added
 
 """
 
@@ -56,15 +56,15 @@ INTERROGATIVE_WORDS = {'乜', '邊個', '邊度', '邊', '點解', '點樣', '�
 def extract_sfps_with_context(corpus, n=2):
     """
     Extracts SFPs and their n-gram POS tag contexts, with a unique count
-    based on the full string of the preceding phrase, with a specific
-    normalization rule for punctuation.
+    based on a robust, token-based deduplication principle.
     """
     print("Extracting SFPs and their syntactic contexts...")
 
-    # Use a set to track canonical contexts to avoid overcounting
-    canonical_patterns_seen = set()
-    sfp_context_data = defaultdict(list)
-    sfp_frequency = defaultdict(int)
+    # Use a dictionary to store all occurrences, grouped by a normalized key
+    normalized_patterns = defaultdict(list)
+    # Use a set to track which sentences have been added to a pattern's list
+    seen_sentences_for_pattern = defaultdict(set)
+
     all_utterances = list(corpus.utterances())
 
     for i, utt in enumerate(all_utterances):
@@ -86,91 +86,93 @@ def extract_sfps_with_context(corpus, n=2):
             sfp_token = tokens[sfp_index]
             unique_sfp = (sfp_token.word, sfp_token.jyutping)
 
-            # Get the preceding words (tokens, including punctuation) for deduplication
-            preceding_tokens = [token.word for token in tokens[:sfp_index]]
+            # --- DEDUPLICATION LOGIC (FIXED) ---
+            # Find the last n non-punctuation/space tokens before the SFP.
+            preceding_tokens = [token for token in tokens[:sfp_index] if token.pos not in ['w', 'S']]
 
-            # Apply the specific normalization rule for deduplication:
-            # "A"+","+"B"+SFP is identical to "B"+SFP
-            # "A"+"B"+SFP is not identical to "A"+","+"B"+SFP
+            # The deduplication key is based on the last 'n' non-punctuation/space words
+            dedupe_key_words = tuple([token.word for token in preceding_tokens[-n:]])
 
-            dedupe_key_words = tuple(preceding_tokens)
-            if len(preceding_tokens) >= 2 and preceding_tokens[-2] == '，' and len(preceding_tokens[-1]) > 0:
-                # Normalizes to just the last word if it's preceded by a comma
-                dedupe_key_words = tuple(preceding_tokens[-1:])
-
-            # The deduplication key is based on this normalized list
+            # The final deduplication key for this specific occurrence
             dedupe_key = (unique_sfp, dedupe_key_words)
 
-            if dedupe_key not in canonical_patterns_seen:
-                canonical_patterns_seen.add(dedupe_key)
-                sfp_frequency[unique_sfp] += 1
+            # Use the full utterance text to ensure no duplicates in the output list
+            full_utterance_text = "".join([token.word for token in tokens])
 
-                # Get the POS tag n-gram for the PMI calculation
+            if full_utterance_text not in seen_sentences_for_pattern[dedupe_key]:
+                seen_sentences_for_pattern[dedupe_key].add(full_utterance_text)
+
+                # Store the current occurrence's context and utterance
                 context_start = max(0, sfp_index - n)
                 context_end = sfp_index
                 context_ngram = tuple(pos_tags[context_start:context_end])
 
-                # Store the canonical context and its first seen occurrence
-                sfp_context_data[unique_sfp].append({
+                occurrence_data = {
                     'context': context_ngram,
-                    'utterance_text': "".join([token.word for token in tokens]),
+                    'utterance_text': full_utterance_text,
                     'utterance_id': str(i)
-                })
+                }
+
+                # Append this occurrence to the list associated with the normalized key
+                normalized_patterns[dedupe_key].append(occurrence_data)
 
     print("Context extraction complete.")
-    return sfp_context_data, sfp_frequency
+    return normalized_patterns
 
-# 2. Pointwise Mutual Information (PMI) Calculation
-def calculate_pmi(sfp_context_data):
+#2.Mutual Information Calculation
+def calculate_mutual_information(normalized_patterns):
     """
-    Calculates the Pointwise Mutual Information (PMI) between SFPs and syntactic contexts
-    based on the deduplicated data.
+    Calculates the Mutual Information (MI) between SFPs and syntactic contexts
+    based on the deduplicated and normalized data.
     """
-    print("Calculating PMI between SFPs and contexts...")
-    pmi_scores = defaultdict(dict)
+    print("Calculating MI between SFPs and contexts...")
+    mi_scores = defaultdict(dict)
 
-    # Use the number of unique contexts as total count
-    total_unique_sfp_count = sum(len(contexts) for contexts in sfp_context_data.values())
+    # Count the number of unique, deduplicated patterns
+    sfp_frequency = defaultdict(int)
+    for dedupe_key in normalized_patterns.keys():
+        sfp = dedupe_key[0]
+        sfp_frequency[sfp] += 1
+
+    total_unique_count = sum(sfp_frequency.values())
 
     # Create frequency counts for the normalized POS tag patterns
     sfp_context_joint_freq = defaultdict(lambda: defaultdict(int))
     context_freq = defaultdict(int)
 
-    for sfp, contexts in sfp_context_data.items():
-        for item in contexts:
-            context_ngram = item['context']
+    for dedupe_key, occurrences in normalized_patterns.items():
+        sfp = dedupe_key[0]
+        context_ngram = occurrences[0]['context']
 
-            # Apply the normalization rule for POS tags: ","+"X" and "X" are identical.
-            # The tag for ',' is 'w'.
-            normalized_context = context_ngram
-            if len(context_ngram) > 1 and context_ngram[-2] == 'w':
-                normalized_context = (context_ngram[-1],)
+        # Apply the normalization rule for POS tags: ","+"X" and "X" are identical.
+        normalized_context = context_ngram
+        if len(context_ngram) > 1 and context_ngram[-2] == 'w':
+            normalized_context = (context_ngram[-1],)
 
-            sfp_context_joint_freq[sfp][normalized_context] += 1
-            context_freq[normalized_context] += 1
+        sfp_context_joint_freq[sfp][normalized_context] += 1
+        context_freq[normalized_context] += 1
 
     total_unique_context_count = sum(context_freq.values())
 
     for sfp, sfp_context_counts in sfp_context_joint_freq.items():
-        sfp_freq = len(sfp_context_data[sfp])
+        sfp_freq = sfp_frequency[sfp]
 
         for context, joint_freq in sfp_context_counts.items():
-            # Calculate probabilities for PMI based on the deduplicated data
-            p_sfp_context = joint_freq / total_unique_sfp_count
-            p_sfp = sfp_freq / total_unique_sfp_count
+            p_sfp_context = joint_freq / total_unique_count
+            p_sfp = sfp_freq / total_unique_count
             p_context = context_freq[context] / total_unique_context_count
 
             if p_sfp > 0 and p_context > 0 and p_sfp_context > 0:
-                pmi = math.log2(p_sfp_context / (p_sfp * p_context))
-                pmi_scores[sfp][context] = pmi
+                mi = p_sfp_context * math.log2(p_sfp_context / (p_sfp * p_context))
+                mi_scores[sfp][context] = mi
 
-    print("PMI calculation complete.")
-    return pmi_scores
+    print("MI calculation complete.")
+    return mi_scores, sfp_frequency
 
-# 3. Utterance Extraction
-def extract_representative_utterances(sfp_context_data, pmi_scores, output_folder):
+#3. Utterance Extraction
+def extract_representative_utterances(normalized_patterns, mi_scores, output_folder):
     """
-    Extracts and saves utterances for top POS tag patterns for each SFP.
+    Extracts and saves up to 100 utterances for top POS tag patterns for each SFP.
     """
     print("Extracting representative utterances...")
 
@@ -178,25 +180,27 @@ def extract_representative_utterances(sfp_context_data, pmi_scores, output_folde
     if not os.path.exists(utterance_folder):
         os.makedirs(utterance_folder)
 
-    for sfp, scores in pmi_scores.items():
-        # Sort contexts by PMI score in descending order
+    # Invert the normalized_patterns dictionary to a more useful structure for this function
+    patt_to_utterances = defaultdict(list)
+    for dedupe_key, occurrences in normalized_patterns.items():
+        sfp = dedupe_key[0]
+        pos_context = occurrences[0]['context']
+        patt_to_utterances[(sfp, pos_context)].extend([o['utterance_text'] for o in occurrences])
+
+    for sfp, scores in mi_scores.items():
         sorted_contexts = sorted(scores.items(), key=lambda item: item[1], reverse=True)
         sfp_char = sfp[0]
-
         output_path = os.path.join(utterance_folder, f"{sfp_char}_utterances.txt")
 
         with open(output_path, "w", encoding='utf-8') as f:
             f.write(f"Representative Utterances for SFP: {sfp_char} ({sfp[1]})\n\n")
 
-            for context, pmi_score in sorted_contexts:
+            for context, mi_score in sorted_contexts:
                 context_desc = " ".join([POS_MAPPING.get(tag, tag) for tag in context])
-                f.write(f"--- Context: {context_desc} (PMI Score: {pmi_score:.4f}) ---\n")
+                f.write(f"--- Context: {context_desc} (MI Score: {mi_score:.4f}) ---\n")
 
-                # Get utterances for this specific context and SFP
-                utterances_for_context = [
-                    item['utterance_text'] for item in sfp_context_data[sfp]
-                    if item['context'] == context
-                ]
+                # Get all utterances for this specific context and SFP
+                utterances_for_context = patt_to_utterances.get((sfp, context), [])
 
                 num_to_extract = min(100, len(utterances_for_context))
 
@@ -209,39 +213,44 @@ def extract_representative_utterances(sfp_context_data, pmi_scores, output_folde
     print("Utterance extraction complete.")
 
 # --- 4. Plotting the Results ---
-def plot_pmi_scores(pmi_scores, sfp_frequency, pdf_pages, n=2):
+def plot_mi_scores(mi_scores, sfp_frequency, pdf_pages, n=2):
     """
-    Generates and saves bar graphs for the top 10 PMI scores for each SFP
+    Generates and saves bar graphs for the top 10 MI scores for each SFP
     into a single PDF file, sorted by SFP frequency.
     """
-    print("Generating plots for PMI scores...")
+    print("Generating plots for MI scores...")
 
     # Sort SFPs by frequency in descending order
     sorted_sfps = sorted(sfp_frequency.items(), key=lambda item: item[1], reverse=True)
 
     for sfp, freq in sorted_sfps:
-        scores = pmi_scores.get(sfp, {})
+        scores = mi_scores.get(sfp, {})
         sorted_contexts = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:10]
 
         if not sorted_contexts:
             continue
 
         contexts_desc = [" ".join(POS_MAPPING.get(tag, tag) for tag in c) for c, score in sorted_contexts]
-        pmi_values = [score for c, score in sorted_contexts]
+        mi_values = [score for c, score in sorted_contexts]
 
         # Define the font file path and its name
         font_file = FONT_PATH
+        if not font_file:
+            print("Font path not set in environment variables. Using default.")
+            font_file = 'C:/Windows/Fonts/NotoSansHK-VariableFont_wght.ttf' # Fallback path
         font_name = 'Noto Sans HK'
-        # Create a font entry and insert it into Matplotlib's font list
-        fe = fm.FontEntry(fname=font_file, name=font_name)
-        fm.fontManager.ttflist.insert(0, fe)
-        # Rebuild the font cache (optional but recommended)
-        #fm._rebuild()
-        plt.rcParams['font.sans-serif'] = font_name
+
+        try:
+            fe = fm.FontEntry(fname=font_file, name=font_name)
+            fm.fontManager.ttflist.insert(0, fe)
+            plt.rcParams['font.sans-serif'] = font_name
+        except FileNotFoundError:
+            print(f"Warning: Font file not found at {font_file}. Plots may not display correctly.")
+            print("Please set the FONT_PATH environment variable to the correct path.")
 
         fig, ax = plt.subplots(figsize=(12, 8))
-        ax.barh(contexts_desc, pmi_values, color='skyblue')
-        ax.set_xlabel("Pointwise Mutual Information (PMI) Score")
+        ax.barh(contexts_desc, mi_values, color='skyblue')
+        ax.set_xlabel("Mutual Information Score")
         ax.set_ylabel("Syntactic Context (POS tags)")
         ax.set_title(f"Top {n}-gram Contexts for SFP: {sfp[0]} ({sfp[1]}) - Freq: {freq}")
         ax.invert_yaxis()
@@ -258,7 +267,7 @@ def plot_pmi_scores(pmi_scores, sfp_frequency, pdf_pages, n=2):
 
     print("All plots saved to PDF.")
 
-# 5. Main
+#5. Main
 if __name__ == '__main__':
     print("Starting analysis...")
 
@@ -272,8 +281,8 @@ if __name__ == '__main__':
     hcc_corpus = pycantonese.hkcancor()
     print("HKCanCor corpus loaded successfully.")
 
-    sfp_context_data, sfp_frequency = extract_sfps_with_context(hcc_corpus, n=2)
-    pmi_scores = calculate_pmi(sfp_context_data)
+    normalized_patterns = extract_sfps_with_context(hcc_corpus, n=2)
+    mi_scores, sfp_frequency = calculate_mutual_information(normalized_patterns)
 
     print("\nSaving results...")
 
@@ -285,27 +294,27 @@ if __name__ == '__main__':
     sfp_freq_df.to_csv(os.path.join(output_folder, "sfp_frequency.csv"), index=False)
     print(f"SFP frequency table saved to {output_folder}/sfp_frequency.csv")
 
-    # Create and save the PMI table
+    # Create and save the Mutual Information table
     data_for_df = []
-    for sfp, scores in pmi_scores.items():
-        for context, pmi_score in scores.items():
+    for sfp, scores in mi_scores.items():
+        for context, mi_score in scores.items():
             data_for_df.append({
                 'sfp_character': sfp[0],
                 'sfp_jyutping': sfp[1],
                 'context': " ".join(context),
-                'pmi_score': pmi_score
+                'mi_score': mi_score
             })
     df = pd.DataFrame(data_for_df)
     df.to_csv(os.path.join(output_folder, "sfp_syntactic_correlations.csv"), index=False)
     print(f"Syntactic correlations table saved to {output_folder}/sfp_syntactic_correlations.csv")
 
     # Extract and save representative utterances
-    extract_representative_utterances(sfp_context_data, pmi_scores, output_folder)
+    extract_representative_utterances(normalized_patterns, mi_scores, output_folder)
 
     # Generate and save plots to a single PDF
-    output_pdf_path = os.path.join(output_folder, "sfp_pmi_scores.pdf")
+    output_pdf_path = os.path.join(output_folder, "sfp_mi_scores.pdf")
     with PdfPages(output_pdf_path) as pdf_pages:
-        plot_pmi_scores(pmi_scores, sfp_frequency, pdf_pages)
+        plot_mi_scores(mi_scores, sfp_frequency, pdf_pages)
     print(f"All plots saved to a single PDF file: {output_pdf_path}")
 
     print("\nSyntactic analysis and data saving complete.")
