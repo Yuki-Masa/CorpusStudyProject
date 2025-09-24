@@ -90,12 +90,12 @@ def extract_sfps_with_context(corpus, n=2):
             preceding_tokens = [token.word for token in tokens[:sfp_index]]
 
             # Apply the specific normalization rule for deduplication:
-            # "A"+"B"+SFP is not identical to "A"+","+"B"+SFP.
-            # "A"+","+"B"+SFP is identical to "B"+SFP.
+            # "A"+","+"B"+SFP is identical to "B"+SFP
+            # "A"+"B"+SFP is not identical to "A"+","+"B"+SFP
 
             dedupe_key_words = tuple(preceding_tokens)
-            if len(preceding_tokens) >= 2 and preceding_tokens[-2] == ',':
-                # Normalizes to just the last word
+            if len(preceding_tokens) >= 2 and preceding_tokens[-2] == '，' and len(preceding_tokens[-1]) > 0:
+                # Normalizes to just the last word if it's preceded by a comma
                 dedupe_key_words = tuple(preceding_tokens[-1:])
 
             # The deduplication key is based on this normalized list
@@ -142,10 +142,9 @@ def calculate_pmi(sfp_context_data):
 
             # Apply the normalization rule for POS tags: ","+"X" and "X" are identical.
             # The tag for ',' is 'w'.
+            normalized_context = context_ngram
             if len(context_ngram) > 1 and context_ngram[-2] == 'w':
                 normalized_context = (context_ngram[-1],)
-            else:
-                normalized_context = context_ngram
 
             sfp_context_joint_freq[sfp][normalized_context] += 1
             context_freq[normalized_context] += 1
