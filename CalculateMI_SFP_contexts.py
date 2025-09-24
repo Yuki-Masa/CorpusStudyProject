@@ -44,7 +44,7 @@ POS_MAPPING = {
     'VG': 'Verb Morpheme', 'V': 'Verb', 'VD': 'Verb as Adverbial',
     'VN': 'Verb with Nominal Function', 'W': 'Punctuation', 'X': 'Unclassified Item',
     'YG': 'Modal Particle Morpheme', 'Y': 'Modal Particle', 'Z': 'Descriptive',
-    'IR': 'interrogative'
+    'IR': 'Interrogative', 'V1': '冇','D1': '鬼','XN': "Foreign Noun", 'VU': 'Auxiliary Verb'
 }
 
 # Add Interrogative tag to mapping and define the list of interrogative words
