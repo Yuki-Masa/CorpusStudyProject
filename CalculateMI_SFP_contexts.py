@@ -87,10 +87,10 @@ def extract_sfps_with_context(corpus, n=2):
             unique_sfp = (sfp_token.word, sfp_token.jyutping)
 
             # --- DEDUPLICATION LOGIC (FIXED) ---
-            # Find the last n non-punctuation/space tokens before the SFP.
-            preceding_tokens = [token for token in tokens[:sfp_index] if token.pos not in ['w', 'S']]
+            # Find the last n non-punctuation/space/SFP tokens before the SFP.
+            preceding_tokens = [token for token in tokens[:sfp_index] if token.pos not in ['w', 'S', 'Y']]
 
-            # The deduplication key is based on the last 'n' non-punctuation/space words
+            # The deduplication key is based on the last 'n' non-punctuation/space/SFP words
             dedupe_key_words = tuple([token.word for token in preceding_tokens[-n:]])
 
             # The final deduplication key for this specific occurrence
