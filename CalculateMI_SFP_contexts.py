@@ -68,7 +68,7 @@ def extract_sfps_with_context(corpus, n=2):
     # Use a dictionary to store all occurrences, grouped by a normalized key
     normalized_patterns = defaultdict(list)
     # Use a set to track which sentences have been added to a pattern's list
-    seen_sentences_for_pattern = defaultdict(set)
+    seen_utterance_and_pattern = set()
 
     all_utterances = list(corpus.utterances())
 
@@ -113,8 +113,11 @@ def extract_sfps_with_context(corpus, n=2):
             # Use the full utterance text to ensure no duplicates in the output list
             full_utterance_text = "".join([token.word for token in tokens])
 
-            if full_utterance_text not in seen_sentences_for_pattern[dedupe_key]:
-                seen_sentences_for_pattern[dedupe_key].add(full_utterance_text)
+            # The key for tracking unique combinations of utterance and pattern
+            unique_key_for_this_occurrence = (full_utterance_text, dedupe_key)
+
+            if unique_key_for_this_occurrence not in seen_utterance_and_pattern:
+                seen_utterance_and_pattern.add(unique_key_for_this_occurrence)
 
                 # Store the current occurrence's context and utterance
                 context_start = max(0, sfp_index - n)
