@@ -87,14 +87,28 @@ def extract_sfps_with_context(corpus, n=2):
             unique_sfp = (sfp_token.word, sfp_token.jyutping)
 
             # --- DEDUPLICATION LOGIC (FIXED) ---
-            # Find the last n non-punctuation/space/SFP tokens before the SFP.
-            preceding_tokens = [token for token in tokens[:sfp_index] if token.pos not in ['w', 'S', 'Y']]
+            # Find the first core word preceding the SFP.
+            core_preceding_word = None
+            preceding_pos_tags = []
 
-            # The deduplication key is based on the last 'n' non-punctuation/space/SFP words
-            dedupe_key_words = tuple([token.word for token in preceding_tokens[-n:]])
+            for j in range(sfp_index - 1, -1, -1):
+                token = tokens[j]
 
-            # The final deduplication key for this specific occurrence
-            dedupe_key = (unique_sfp, dedupe_key_words)
+                # Exclude punctuation, spaces, and SFPs
+                if token.pos in ['w', 'S', 'Y', 'E', 'O']:
+                    continue
+                # The first content word found is our core word
+                else:
+                    preceding_pos_tags = [pos_tags[k] for k in range(j, sfp_index)]
+                    core_preceding_word = token.word
+                    break
+
+            # The deduplication key is the SFP and the core preceding word.
+            # Use a placeholder if no core word is found.
+            if core_preceding_word:
+                dedupe_key = (unique_sfp, core_preceding_word)
+            else:
+                dedupe_key = (unique_sfp, "<empty_context>")
 
             # Use the full utterance text to ensure no duplicates in the output list
             full_utterance_text = "".join([token.word for token in tokens])
@@ -265,7 +279,7 @@ def plot_mi_scores(mi_scores, sfp_frequency, pdf_pages, n=2):
         pdf_pages.savefig(fig)
         plt.close(fig)
 
-    print("All plots saved to PDF.")
+    print("All plots saved to a single PDF file: {output_pdf_path}")
 
 #5. Main
 if __name__ == '__main__':
