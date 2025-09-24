@@ -51,12 +51,21 @@ POS_MAPPING = {
 POS_MAPPING['interrogative'] = 'Interrogative Pronoun/Adverb'
 INTERROGATIVE_WORDS = {'乜', '邊個', '邊度', '邊', '點解', '點樣', '幾時', '幾', '幾多', '咩'}
 
+# Define a list of fixed, multi-word patterns to be treated as a single unit.
+# The SFP is not included here. The key is to match these fixed phrases
+# and use them for deduplication.
+FIXED_PATTERNS = [
+    ('真', '係'), # 真係啊
+    ('搞', '錯'), # 搞錯啊
+    ('係', '唔', '係'), # 係唔係啊
+    ('個', '八'), # 個八啊
+]
 
 # 1. SFP Extraction with Context
 def extract_sfps_with_context(corpus, n=2):
     """
     Extracts SFPs and their n-gram POS tag contexts, with a unique count
-    based on a robust, token-based deduplication principle.
+    based on a robust, hybrid deduplication principle.
     """
     print("Extracting SFPs and their syntactic contexts...")
 
@@ -86,29 +95,36 @@ def extract_sfps_with_context(corpus, n=2):
             sfp_token = tokens[sfp_index]
             unique_sfp = (sfp_token.word, sfp_token.jyutping)
 
-            # --- DEDUPLICATION LOGIC (FIXED) ---
-            # Find the first core word preceding the SFP.
-            core_preceding_word = None
-            preceding_pos_tags = []
+            # --- HYBRID DEDUPLICATION LOGIC (FIXED) ---
+            dedupe_key_words = "<empty_context>"
 
-            for j in range(sfp_index - 1, -1, -1):
-                token = tokens[j]
-
-                # Exclude punctuation, spaces, and SFPs
-                if token.pos in ['w', 'S', 'Y', 'E', 'O']:
-                    continue
-                # The first content word found is our core word
-                else:
-                    preceding_pos_tags = [pos_tags[k] for k in range(j, sfp_index)]
-                    core_preceding_word = token.word
+            # First, check for predefined fixed patterns
+            found_fixed_pattern = False
+            for pattern in FIXED_PATTERNS:
+                # Check if the pattern exists right before the SFP
+                pattern_len = len(pattern)
+                preceding_tokens = tokens[sfp_index - pattern_len:sfp_index]
+                preceding_words = tuple([t.word for t in preceding_tokens])
+                if preceding_words == pattern:
+                    dedupe_key_words = "-".join(pattern)
+                    found_fixed_pattern = True
                     break
 
-            # The deduplication key is the SFP and the core preceding word.
-            # Use a placeholder if no core word is found.
-            if core_preceding_word:
-                dedupe_key = (unique_sfp, core_preceding_word)
-            else:
-                dedupe_key = (unique_sfp, "<empty_context>")
+            # If a fixed pattern was not found, apply the dynamic analysis
+            if not found_fixed_pattern:
+                preceding_tokens = tokens[:sfp_index]
+
+                # Iterate backward to find the first core word
+                for j in range(len(preceding_tokens) - 1, -1, -1):
+                    token = preceding_tokens[j]
+
+                    # Core words are Nouns, Verbs, or Adjectives
+                    if token.pos in ['N', 'V', 'A']:
+                        dedupe_key_words = token.word
+                        break
+
+            # The final deduplication key for this specific occurrence
+            dedupe_key = (unique_sfp, dedupe_key_words)
 
             # Use the full utterance text to ensure no duplicates in the output list
             full_utterance_text = "".join([token.word for token in tokens])
